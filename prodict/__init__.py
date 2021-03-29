@@ -1,5 +1,6 @@
 from typing import Any, List, TypeVar, Tuple
 import copy
+from enum import IntEnum, Enum
 
 # from typing_inspect import get_parameters
 
@@ -137,11 +138,18 @@ class Prodict(dict):
         attr_type1 = self.attr_type(attr_name)
         constructor = None
         element_type = None
-        # print('     attr_name="{}" attr_type={} value={}'.format(attr_name, attr_type1, value))
+        self_types = [IntEnum, Enum]
+        #if attr_name == "bots":
+        #    print('     attr_name="{}" attr_type={} value={}'.format(attr_name, attr_type1, value))
         # print("attr_type1:", attr_type1)
         # print("type(attr_type1):", type(attr_type1))
         # print(dir(attr_type1))
-        if attr_type1 == float:
+        #print(attr_type1)
+        for t in self_types:
+            if type(t) == type(attr_type1): constructor = attr_type1
+        if constructor != None: #we just got a constructor from the prev line of code
+            pass
+        elif attr_type1 == float:
             constructor = float
         elif attr_type1 == str:
             constructor = str
@@ -154,15 +162,22 @@ class Prodict(dict):
         elif attr_type1 is Any:
             constructor = None
         elif isinstance(value, dict):
+            #print(attr_name, self.attr_type(attr_name))
             if attr_type1 == dict:
                 constructor = Prodict.from_dict
             elif issubclass(attr_type1, Prodict):
                 constructor = self.attr_type(attr_name).from_dict
+            elif attr_type1.__origin__ is dict:
+                if len(attr_type1.__args__) > 1:
+                    if hasattr(attr_type1.__args__[1], "dict_of_self"):
+                        constructor = attr_type1.__args__[1].dict_of_self
+                    else:
+                        constructor = dict_of_something(attr_type1.__args__[1])
         elif attr_type1 is List:
             # if the type is 'List'
             constructor = list
         elif hasattr(attr_type1, '__origin__'):
-            if attr_type1.__dict__['__origin__'] is list:
+            if attr_type1.__origin__ is list:
                 # if the type is 'List[something]'
                 if len(attr_type1.__args__) == 0:
                     constructor = list
@@ -170,13 +185,23 @@ class Prodict(dict):
                     constructor = List
                     element_type = attr_type1.__args__[0]
                 elif len(attr_type1.__args__) > 1:
-                    raise TypeError('Only one dimensional List is supported, like List[str], List[int], List[Prodict]')
-            elif attr_type1.__dict__['__origin__'] is tuple:
+                    raise TypeError('Only one dimensional List is supported, like List[str], List[int], List[Prodict]. This error is coming from property ' + attr_name)
+            elif attr_type1.__origin__ is dict:
+                constructor = dict
+            elif attr_type1.__origin__ is tuple:
                 # if the type is 'Tuple[something]'
                 constructor = tuple
 
         # print('     constructor={} element_type={}'.format(constructor, element_type))
         return constructor, element_type
+
+    @classmethod
+    def dict_of_self(cls, d: dict):
+        val: dict[cls] = {}
+        for key, value in d.items():
+            val[key] = cls.from_dict(value)
+        return val # type: cls
+
 
     def set_attribute(self, attr_name, value):
         if attr_name in DICT_RESERVED_KEYS:
@@ -188,6 +213,7 @@ class Prodict(dict):
                 self[attr_name] = value
             else:
                 constructor, element_type = self.get_constructor(attr_name, value)
+                #print(attr_name, constructor, value)
                 if constructor is None:
                     self.update({attr_name: value})
                 elif constructor == List:
@@ -263,20 +289,39 @@ class Prodict(dict):
     def __setattr__(self, name: str, value) -> None:
         self.set_attribute(name, value)
 
-    def to_dict(self, *args, is_recursive=False, exclude_none=False, **kwargs):
+    def to_dict(self, *args, is_recursive=True, exclude_none=False, **kwargs):
         ret = {k: _dict_value(v, is_recursive=is_recursive, exclude_none=exclude_none)
                for k, v in self.items()
                if _none_condition(v, is_recursive=is_recursive, exclude_none=exclude_none)}
-
-        # another way to do it
-        # ret2 = {}
-        # for k, v in self.items():
-        #     # print(k, v)
-        #     if exclude_none and v is None:
-        #         continue
-        #     if is_recursive and isinstance(v, Prodict):
-        #         vv = v.to_dict()
-        #     else:
-        #         vv = v
-        #     ret2[k] = vv
         return ret
+        # another way to do it
+        ret2 = {}
+        for k, v in self.items():
+            # print(k, v)
+            if exclude_none and v is None:
+                continue
+            vv = v
+            if is_recursive:
+                if isinstance(v, Prodict):
+                    vv = v.to_dict()
+                elif isinstance(v, dict):
+                    vv = dict_of_prodict_to_dict_of_dict(vv)
+            else:
+                vv = v
+            ret2[k] = vv
+        return ret2
+
+
+def dict_of_prodict_to_dict_of_dict(vv:dict[str, Prodict]) -> dict:
+    ret = {}
+    for k, v in vv.items():
+        ret[k] = v.to_dict(is_recursive=True)
+    return ret
+
+def dict_of_something(something):
+    def return_type(d):
+        val: dict[something] = {}
+        for key, value in d.items():
+            val[key] = something(value)
+        return val # type: dict[str, something]
+    return return_type
