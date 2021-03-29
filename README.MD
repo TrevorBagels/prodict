@@ -12,7 +12,7 @@ Those are all the changes that come to mind, for more documentation, I highly re
 ## Some examples
 
 Example of a dictionary of prodicts
-```
+```python
 from prodict import Prodict
 from enum import IntEnum
 
